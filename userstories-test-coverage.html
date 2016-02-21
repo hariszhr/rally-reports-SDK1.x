@@ -1,0 +1,198 @@
+<!--
+Author: Haris R
+Date: July 2015
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html>
+<head>
+    <title>User Stories By Iteration</title>
+    <meta name="Name" content="User Stories Table" />
+
+    <script type="text/javascript" src="https://rally1.rallydev.com/apps/1.32/sdk.js"></script>
+    <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+    <script type="text/javascript">
+
+        google.load('visualization', '1', {packages: ['table']});
+        var rallyDataSource = null;
+        var myDropdown = null;
+        var dropdown_type=null;
+        var waiter;
+        var checkbox=null;
+        var radiobutton1=null;
+        var radiobutton2=null;
+
+        rally.addOnLoad(onLoad);
+
+        function onLoad() {
+            rallyDataSource = new rally.sdk.data.RallyDataSource('__WORKSPACE_OID__',
+                    '__PROJECT_OID__',
+                    'false',
+                    'false');
+
+
+            checkbox = new rally.sdk.ui.basic.CheckBox({value: "blah", label: "Filter by Release or Iteration", labelPosition: "after", checked: false, rememberChecked: false});
+            checkbox.display("checkbox1", radio_buttons);
+            _fetchData();
+
+            function radio_buttons(){
+                if(radiobutton1){
+                    radiobutton1.destroy();
+                };
+                if(radiobutton2){
+                    radiobutton2.destroy();
+                };
+                if(checkbox.getChecked()){
+                    radiobutton1 = new rally.sdk.ui.basic.RadioButton({value: "myIteration", label: "Iteration", groupName: "stories list filter", labelPosition: "after", rememberChecked: false, checked: false});
+                    radiobutton1.display("button1", onChanged);
+
+                    radiobutton2 = new rally.sdk.ui.basic.RadioButton({value: "myRelease", label: "Release", groupName: "stories list filter", labelPosition: "after", rememberChecked: false, checked: false});
+                    radiobutton2.display("button2", onChanged);
+
+                    function onChanged(sender, eventArgs){
+                        if(myDropdown){
+                            myDropdown.destroy();
+                        };
+                        if(eventArgs.checked){
+                            if(eventArgs.value.indexOf("myRelease") !== -1){
+                                myDropdown = new rally.sdk.ui.ReleaseDropdown({rememberSelection: false}, rallyDataSource); dropdown_type=eventArgs.value;
+                                myDropdown.display(document.getElementById("dropdown_menu"), _fetchData);
+                            } else if (eventArgs.value.indexOf("myIteration") !== -1){
+                                myDropdown = new rally.sdk.ui.IterationDropdown({rememberSelection: false}, rallyDataSource); dropdown_type=eventArgs.value;
+                                myDropdown.display(document.getElementById("dropdown_menu"), _fetchData);
+                            } else {
+                                console.error('ERROR1: radio button is checked, but the value is neither "release" nor "iteration, weird!"');
+                            };
+                        } else {
+                            console.error('ERROR3: no radio button is checked, which cannot happen in normal cases. weird!');
+                        };
+                    };
+                } else {
+                    if(myDropdown){
+                        myDropdown.destroy()
+                    };
+                    myDropdown=null;
+                    dropdown_type=null;
+                    _fetchData();
+                };
+            };
+        };
+
+        function hideSpinner() {
+            waiter.hide();
+        }
+
+        function showSpinner() {
+            waiter = new rally.sdk.ui.basic.Wait({hideTarget: true});
+            waiter.display("wait");
+        }
+
+        function _fetchData() {
+            var queryConfig = null;
+            if(dropdown_type === null){
+                queryConfig = {
+                    type : 'hierarchicalrequirement',
+                    key : 'stories',
+                    fetch: 'FormattedID,Name,TestCases,KanbanState,Iteration,Release,DisplayName,SubmittedBy,Owner',
+                    order: 'KanbanState,FormattedID'
+                }
+            }else if(dropdown_type.indexOf("myIteration") !== -1){
+                queryConfig = {
+                    type : 'hierarchicalrequirement',
+                    key : 'stories',
+                    fetch: 'FormattedID,Name,TestCases,KanbanState,Iteration,Release,DisplayName,SubmittedBy,Owner',
+                    order: 'KanbanState,FormattedID',
+                    query: '(Iteration.Name = "' + encodeURIComponent(myDropdown.getSelectedName()) + '")'
+                };
+            }else if(dropdown_type.indexOf("myRelease") !== -1){
+                queryConfig = {
+                    type : 'hierarchicalrequirement',
+                    key : 'stories',
+                    fetch: 'FormattedID,Name,TestCases,KanbanState,Iteration,Release,DisplayName,SubmittedBy,Owner',
+                    order: 'KanbanState,FormattedID',
+                    query: '(Release.Name = "' + encodeURIComponent(myDropdown.getSelectedName()) + '")'
+                };
+            } else {
+                console.log('ERROR2');
+            };
+            showSpinner();
+            rallyDataSource.findAll(queryConfig, _loadTable);
+        };
+
+        function _loadTable(results) {
+            var collectstories=[];
+            var testcases_count=0;
+            for(var i=0; i < results.stories.length; i++){
+                var a = {
+                    item: {
+                        "FormattedID": results.stories[i].FormattedID,
+                        "_ref": results.stories[i]._ref
+                    }
+                };
+                var storiesLink = new rally.sdk.ui.basic.Link(a);
+                var storiesIdent = storiesLink.renderToHtml();
+                var storiesNames=results.stories[i].Name;
+
+                var testcazez = "";
+
+                for(var ii=0; ii<results.stories[i].TestCases.length; ii++){
+                    var b = {
+                        item: {
+                            "FormattedID": results.stories[i].TestCases[ii].FormattedID,
+                            "_ref": results.stories[i].TestCases[ii]._ref
+                        }
+                    };
+                    var testcasesLink = new rally.sdk.ui.basic.Link(b);
+                    var testcasesId = testcasesLink.renderToHtml();
+
+                    testcazez=testcazez + (ii+1) +". " +testcasesId+": "+results.stories[i].TestCases[ii].Name + "<br>";
+                };
+
+                var my_row = [storiesIdent,storiesNames,testcazez];
+
+                testcases_count=testcases_count+results.stories[i].TestCases.length;
+                collectstories.push(my_row);
+
+            }
+
+            var data = new google.visualization.DataTable();
+            data.addColumn('string', 'ID');
+            data.addColumn('string', 'User Stories');
+            data.addColumn('string', 'TestCases ('+testcases_count+')');
+            data.addRows(collectstories);
+
+            table = new google.visualization.Table(document.getElementById('stories'));
+            data.sort([{column: 0, asc: true}]);
+            table.draw(data, {allowHtml: true, showRowNumber: true, alternatingRowStyle: true});
+            hideSpinner();
+            //----------------------
+        };
+    </script>
+
+    <style type="text/css">
+        /* Add app styles here */
+        h1 {
+            color: black;
+        }
+        body {
+            background-color: beige;
+        }
+        div#stories {
+            background-color: beige;
+        }
+
+    </style>
+
+</head>
+<body>
+<br/>
+<h1><center>User Stories (Test Cases Coverage)</center></h1>
+<div id="checkbox1"></div>
+<div id="button1"></div>
+<div id="button2"></div>
+<br/>
+<div id="dropdown_menu"></div>
+<br/><br/>
+<div id="wait"></div>
+<div id="stories"></div>
+</body>
+</html>

@@ -1,0 +1,551 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<!--
+Author: Haris R
+Date: November 2015
+Posted by Debbie Knoles 
+<!--App information-->
+<html>
+<head>
+<title>Test Report</title>
+<meta name="Name" content="App: Test Report"/>
+<meta name="Version" content="1.0"/>
+<meta name="Vendor" content="Nuance QA"/>
+
+<!--Include SDK-->
+<script type="text/javascript" src="/apps/1.32/sdk.js"></script>
+<script type="text/javascript" src="https://www.google.com/jsapi"></script>
+
+<style type="text/css">
+    body {
+        background-color: #ffffff;
+    }
+    #table div div table tbody tr:nth-last-child(1) {
+        font-weight: bold;
+    }
+    #visualization {
+        width: 400px;
+        height: 200px;
+    }
+    #visualization2 {
+        width: 400px;
+        height: 200px;
+    }
+    #releaseDiv {
+        float: left;
+    }
+    #testsetDiv {
+        float: left;
+        clear: left;
+        padding-top: 10px;
+    }
+    #refreshIt {
+        float: left;
+        clear: left;
+        padding-top: 10px;
+    }
+    #heading {
+        padding-bottom: 10px;
+    }
+    #testset_header {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+</style>
+
+<script type="text/javascript">
+
+google.load("visualization", "1", {
+    packages: ["corechart"]
+});
+google.load('visualization', '1', {
+    packages: ['table']
+});
+
+var table, releaseDropdown, testsetDropdown, rallyDataSource, total_testcases, testcases_with_results, total_automated, total_manual;
+var all_name_list, all_desc_list, all_formatted_ID, all_method_list;
+var num_of_builds = 10;
+//starting point of the application
+rally.addOnLoad(onLoad);
+
+
+function onLoad() {
+    rallyDataSource = new rally.sdk.data.RallyDataSource('__WORKSPACE_OID__',
+        '__PROJECT_OID__',
+        '__PROJECT_SCOPING_UP__',
+        '__PROJECT_SCOPING_DOWN__');
+    showdropdown();
+}
+
+//-----------------Dropdown Menus---------------------//
+function showdropdown() {
+    var config1 = {
+        label: "Select a release: "
+    };
+    releaseDropdown = new rally.sdk.ui.ReleaseDropdown(config1, rallyDataSource);
+    releaseDropdown.display("releaseDiv", vega);
+
+    function vega(releases, eventArgs) {
+        if (testsetDropdown) {
+            testsetDropdown.destroy();
+        }
+        var config2 = {
+            type: 'testset',
+            attribute: 'Name',
+            label: "Select a test set: ",
+            query: '(Release.Name = "' + encodeURIComponent(releases.getDisplayedValue()) + '")'
+        };
+
+        testsetDropdown = new rally.sdk.ui.ObjectDropdown(config2, rallyDataSource);
+        testsetDropdown.display("testsetDiv", refreshMe);
+    };
+};
+
+//Refresh the queries to be sent to Rally (depends on what dropdown values are selected)
+function refreshMe() {
+
+    //******This is to get total number of testcases in a testset******
+    total_testcases = 0;
+    all_name_list = new Array();
+    all_desc_list = new Array();
+    all_method_list = new Array();
+    all_formatted_ID = new Array();
+
+    var myqueryObject = {
+        type: 'testset',
+        key: 'ts',
+        fetch: 'TestCases,FormattedID,Name,Description,Method',
+        query: '(Release.Name = "' + encodeURIComponent(releaseDropdown.getValue()) + '")'
+    };
+
+    showSpinner();
+    rallyDataSource.findAll(myqueryObject, myCounter);
+
+    function myCounter(counts) {
+
+        var testSetName = testsetDropdown.getDisplayedValue();
+        var testSetId = null;
+
+        for (var i = 0; i < counts.ts.length; i++) {
+            if (counts.ts[i].Name.indexOf(testSetName) > -1) {
+                testSetId = counts.ts[i].FormattedID;
+                for (var j = 0; j < counts.ts[i].TestCases.length; j++) {
+                    all_name_list[j] = counts.ts[i].TestCases[j].Name;
+                    all_desc_list[j] = counts.ts[i].TestCases[j].Description;
+                    all_method_list[j] = counts.ts[i].TestCases[j].Method;
+                    var f = {
+                        item: {
+                            FormattedID: counts.ts[i].TestCases[j].FormattedID,
+                            _ref: counts.ts[i].TestCases[j]._ref
+                        }
+                    };
+                    var aLink = new rally.sdk.ui.basic.Link(f);
+                    all_formatted_ID[j] = aLink.renderToHtml();
+                }
+                total_testcases = counts.ts[i].TestCases.length;
+                console.log('total testcases: ' + total_testcases);
+                break;
+            }
+        }
+
+        //printing testsetid and name on the page
+        if (testSetId) {
+            document.getElementById("testset_header").innerHTML = testSetId + ': ' + testSetName;
+        } else {
+            document.getElementById("testset_header").innerHTML = '';
+        }
+
+
+        Continue();
+
+    }
+    //*******************************************************************
+    function Continue() {
+        //variables to save what is selected in the dropdown menus...
+        var testsetClause = '(TestSet = "' + encodeURIComponent(testsetDropdown.getValue()) + '")';
+        var releaseClause = '(TestSet.Release.Name = "' + encodeURIComponent(releaseDropdown.getSelectedName()) + '")';
+
+        var queryObject = {
+            type: 'TestCaseResult',
+            key: 'tcresults',
+            fetch: 'Build,Name,TestSet,Verdict,TestCase,FormattedID,Description,Method'
+        };
+
+        //setting up queries
+        if (testsetClause) {
+            queryObject.query = '(' + testsetClause + ' AND ' + releaseClause + ')';
+        }
+
+        //Sends the request to Rally. Response of the query is sent to the argument of renderChartsAndTables(results)
+        rallyDataSource.findAll(queryObject, renderChartsAndTables);
+    };
+}
+
+
+//Render columchart and tables from Google JS API---------//
+function renderChartsAndTables(results) {
+
+    var pass = new Array();
+    var fail = new Array();
+    var others = new Array();
+    var builds = new Array();
+    var collectIDs = new Array();
+    var testname = new Array();
+    var myverdict = new Array();
+    var mybuilds = new Array();
+    var myformattedID = new Array();
+    var mydesc = new Array();
+    var mymethod = new Array();
+    var IDcounter = [];
+    testcases_with_results = 0;
+    total_automated = 0;
+    total_manual = 0;
+    var indexo = 0;
+
+    //saving last j number of builds in an array
+    var j = 0;
+    for (var i = 1; i < results.tcresults.length; i++) {
+        var TestCaseResult = results.tcresults[results.tcresults.length - i];
+        if (builds.indexOf(TestCaseResult.Build) === -1) {
+            builds[j] = TestCaseResult.Build;
+            j++;
+            if (j === num_of_builds) break;
+        }
+    }
+
+    for (var v = 0; v < j; v++) {
+        pass[v] = 0;
+        fail[v] = 0;
+        others[v] = 0;
+    }
+
+    for (var i = 0; i < results.tcresults.length; i++) {
+        var TestCaseResult = results.tcresults[i];
+
+        for (var v = 0; v < j; v++) {
+            if (TestCaseResult.Verdict === "Pass") {
+                if (TestCaseResult.Build === builds[v]) {
+                    pass[v]++;
+                }
+            }
+            if (TestCaseResult.Verdict === "Fail") {
+                if (TestCaseResult.Build === builds[v]) {
+                    fail[v]++;
+                }
+            }
+            if (TestCaseResult.Verdict === "Blocked" ||
+                TestCaseResult.Verdict === "Error" ||
+                TestCaseResult.Verdict === "In Progress" ||
+                TestCaseResult.Verdict === "Inconclusive" ||
+                TestCaseResult.Verdict === "Skipped") {
+                if (TestCaseResult.Build === builds[v]) {
+                    others[v]++;
+                }
+            }
+        }
+    }
+
+    var a = new Array();
+    var totalPass = 0;
+    var totalFail = 0;
+    var totalOther = 0;
+    a[0] = ['Build', 'Pass', 'Fail', 'Other'];
+    if (results.tcresults.length > 0) {
+        for (var v = 0; v < j; v++) {
+            a[v + 1] = [builds[v], pass[v], fail[v], others[v]];
+            totalPass = totalPass + pass[v];
+            totalFail = totalFail + fail[v];
+            totalOther = totalOther + others[v];
+        }
+    } else {
+        j = 1; //make j=1 so that we are not sending null object in Barchart
+        for (var v = 0; v < j; v++) {
+            a[v + 1] = ["", 0, 0, 0];
+        }
+    };
+
+    var data = google.visualization.arrayToDataTable(a);
+
+    // Create and draw the barchart(google api)
+    new google.visualization.BarChart(document.getElementById('columnChart')).
+    draw(data, {
+        title: "",
+        width: 900,
+        height: j * 80,
+        hAxis: {
+            title: "Number of testcases"
+        },
+        vAxis: {
+            title: "Build"
+        }
+    });
+
+    data.addRows(1);
+    data.setCell(j, 0, 'Total');
+    data.setCell(j, 1, totalPass);
+    data.setCell(j, 2, totalFail);
+    data.setCell(j, 3, totalOther);
+
+
+
+    //Create and draw the table(google api)
+    new google.visualization.Table(document.getElementById('table')).draw(data, null);
+
+    //------------------------------------//
+
+
+
+    for (var i = 0; i < results.tcresults.length; i++) {
+        if (builds.indexOf(results.tcresults[i].Build) > -1) {
+            testname[indexo] = results.tcresults[i].TestCase.Name;
+            mybuilds[indexo] = results.tcresults[i].Build;
+            myverdict[indexo] = results.tcresults[i].Verdict;
+            myformattedID[indexo] = results.tcresults[i].TestCase.FormattedID;
+            //-------adding testcase link to ID-----------------
+
+            var a = {
+                item: {
+                    FormattedID: results.tcresults[i].TestCase.FormattedID,
+                    "_ref": results.tcresults[i].TestCase._ref
+                }
+            };
+            var storiesLink = new rally.sdk.ui.basic.Link(a);
+            var storiesIdent = storiesLink.renderToHtml();
+            collectIDs[indexo] = storiesIdent;
+            //--------------------------------------------
+
+            mydesc[indexo] = results.tcresults[i].TestCase.Description;
+            mymethod[indexo] = results.tcresults[i].TestCase.Method;
+            indexo++;
+        }
+    }
+
+    var data2 = new google.visualization.DataTable();
+    data2.addColumn('string', 'FormattedID');
+    data2.addColumn('string', 'TestCase');
+    data2.addColumn('string', 'Description');
+    data2.addColumn('string', 'Method');
+    for (var v = 0; v < j; v++) {
+        data2.addColumn('string', 'Build: ' + builds[v]);
+    }
+
+    for (var count = 0; count < (myformattedID.length); count++) {
+        var indices = [];
+        var idx = myformattedID.indexOf(myformattedID[count]);
+        while (idx != -1) {
+            indices.push(idx);
+            idx = myformattedID.indexOf(myformattedID[count], idx + 1);
+        };
+
+        var ind = new Array();
+        for (var v = 0; v < j; v++) {
+            ind[v] = null;
+        };
+
+        for (var i = 0; i < indices.length; i++) {
+            for (var v = 0; v < j; v++) {
+                if (mybuilds[indices[i]] == builds[v]) {
+                    ind[v] = indices[i];
+                }
+            };
+        };
+
+        var fox = new Array();
+        for (var v = 0; v < (j + 3); v++) {
+            fox[v] = "";
+        };
+        if (IDcounter.indexOf(myformattedID[count]) == -1) {
+            fox[0] = collectIDs[count];
+            fox[1] = testname[count];
+            fox[2] = mydesc[count];
+            fox[3] = mymethod[count];
+            for (var v = 0; v < j; v++) {
+                fox[v + 4] = myverdict[ind[v]];
+            };
+            //counter for testcases with results
+            testcases_with_results = testcases_with_results + 1;
+
+            //counter for automated & manual testcases
+            if (fox[3].indexOf("Automated") == -1) {
+                total_manual = total_manual + 1;
+            } else {
+                total_automated = total_automated + 1;
+            }
+
+            data2.addRow(fox);
+            IDcounter.push(myformattedID[count]);
+        };
+    };
+
+    var temp_zrf = all_formatted_ID.length - testcases_with_results;
+    console.log('number of testcases with no result: ' + temp_zrf);
+
+    //Now add the remaining testcases to the list which don't have any results added to them...
+    if (all_formatted_ID != null) {
+        fox = new Array();
+        for (var vi = 0; vi < all_formatted_ID.length; vi++) {
+            if (collectIDs.indexOf(all_formatted_ID[vi]) == -1) {
+                console.log('testcase (with no result): ' + all_name_list[vi]);
+                fox[0] = all_formatted_ID[vi];
+                fox[1] = all_name_list[vi];
+                fox[2] = all_desc_list[vi];
+                fox[3] = all_method_list[vi];
+                for (var v = 0; v < j; v++) {
+                    fox[v + 4] = "";
+                };
+
+                //counter for automated & manual testcases
+                if (fox[3].indexOf("Automated") == -1) {
+                    total_manual = total_manual + 1;
+                } else {
+                    total_automated = total_automated + 1;
+                }
+
+                data2.addRow(fox);
+            };
+        };
+    };
+
+
+    // Add Color format to table (pass->green, fail->red, error->orange inconclusive->blue)
+    var formatter = new google.visualization.TableColorFormat();
+    formatter.addRange('Pass', 'Passa', 'white', 'green');
+    formatter.addRange('Fail', 'Faila', 'white', 'red');
+    formatter.addRange('Error', 'Errora', 'white', 'orange');
+    formatter.addRange('Inconclusive', 'Inconclusivea', 'white', 'orange');
+    formatter.addRange('Blocked', 'Blockeda', 'white', 'orange');
+    formatter.addRange('Skipped', 'Skippeda', 'white', 'orange');
+    for (var v = 0; v < j; v++) {
+        formatter.format(data2, v + 4);
+    };
+
+    //Create and draw the table(google api)
+    //Sort table 'asc' according to first column
+    data2.sort([{
+        column: 4,
+        asc: true
+    }]);
+    //{allowHtml: true, showRowNumber: true} is to render colors and show row# on the table
+    new google.visualization.Table(document.getElementById('table2')).draw(data2, {
+        allowHtml: true,
+        showRowNumber: true
+    });
+
+    DrawPieChart(all_formatted_ID.length, testcases_with_results);
+
+    console.log("total automated testcases: " + total_automated);
+    console.log("total manual testcases: " + total_manual);
+
+    DrawPieChartAutoVSManual(all_formatted_ID.length, total_automated, total_manual);
+
+    hideSpinner();
+
+}
+
+function DrawPieChart(total, with_results) {
+    if (total < with_results) {
+        console.log('someting is wrong (A)');
+        total = with_results;
+    };
+
+    var data = google.visualization.arrayToDataTable([
+        ['blah', 'blah'],
+        ['Testcases completed', with_results],
+        ['Testcases with NO result', total - with_results]
+    ]);
+
+    // Create and draw the visualization.
+
+    var options1 = {
+        title: 'TestSet progress',
+        pieSliceText: 'percentage',
+        pieHole: 0.2
+    };
+    new google.visualization.PieChart(document.getElementById('visualization')).draw(data, options1);
+};
+
+function DrawPieChartAutoVSManual(total_testcases, auto, manual) {
+    if (total_testcases == auto + manual) {
+        var data = google.visualization.arrayToDataTable([
+            ['blah', 'blah'],
+            ['# of automated testcases', auto],
+            ['# of manual testcases', manual]
+        ]);
+
+        // Create and draw the visualization.
+        var options2 = {
+            pieSliceText: 'percentage',
+            slices: {
+                0: {
+                    color: 'green'
+                },
+                1: {
+                    color: 'grey'
+                }
+            },
+            title: 'Test method stats',
+            pieHole: 0.2
+        };
+        new google.visualization.PieChart(document.getElementById('visualization2')).draw(data, options2);
+    } else {
+        console.log("total testcases number is not equal to auto + manual. Something is wrong...");
+    }
+};
+
+function hideSpinner() {
+    waiter.hide();
+}
+
+function showSpinner() {
+    waiter = new rally.sdk.ui.basic.Wait({
+        hideTarget: true
+    });
+    waiter.display("wait");
+}
+
+</script>
+</head>
+<body class="Test Report">
+    <div>
+        <div id="heading">
+            <h1>
+                <center>NAR7 Regression Report</center>
+            </h1>
+        </div>
+        <div id="wait"></div>
+        <table>
+            <tr>
+                <td>
+                    <div id="releaseDiv"></div>
+                    <div id="testsetDiv"></div>
+                    <div id="refreshIt">
+                        <input type="button" value="Refresh" onClick="document.location.reload(true)" />
+                    </div>
+                </td>
+                <td>
+                    <div id="visualization"></div>
+                </td>
+                <td>
+                    <div id="visualization2"></div>
+                </td>
+            </tr>
+        </table>
+    </div>
+    <hr />
+    <h2 id="testset_header"></h2>
+    <h3>Test Summary</h3>
+    <table>
+        <tr>
+            <td>
+                <div id="columnChart"></div>
+            </td>
+            <td>
+                <div id="table"></div>
+            </td>
+        </tr>
+    </table>
+    <hr />
+    <h3>List Of TestCases</h3>
+    <div id="table2"></div>
+</body>
+</html>

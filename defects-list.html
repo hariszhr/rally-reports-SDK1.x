@@ -1,0 +1,173 @@
+<!--
+Author: Haris R
+Date: 03May2013
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html>
+<head>
+   <title>User defects By Iteration</title>
+   <meta name="Name" content="App Example: User defects Table" />
+
+   <script type="text/javascript" src="/apps/1.32/sdk.js"></script>
+   <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+   
+   <script type="text/javascript">
+
+	google.load('visualization', '1', {packages: ['table']});
+    var rallyDataSource = null; var myDropdown = null; var relDropdown = null; var table = null; var dropdown_type=null; var first_time=true
+
+    function my_main() {
+		rallyDataSource = new rally.sdk.data.RallyDataSource('__WORKSPACE_OID__',
+                                    '__PROJECT_OID__',
+                                    'true', //'true' here means results are also fetched from the parent Project
+                                    'true');//'true' here means results are also fetched from the child Projects
+                                    //'__PROJECT_SCOPING_UP__',
+                                    //'__PROJECT_SCOPING_DOWN__');
+									
+			radiobutton1 = new rally.sdk.ui.basic.RadioButton({value: "Iteration", label: "iteration", groupName: "defects list filter", labelPosition: "after"});
+			radiobutton1.display("button1", onChanged);
+			
+			radiobutton2 = new rally.sdk.ui.basic.RadioButton({value: "Release", label: "release", groupName: "defects list filter", labelPosition: "after"});
+			radiobutton2.display("button2", onChanged);
+			
+			if(first_time){
+				if(radiobutton1.getChecked()){myDropdown = new rally.sdk.ui.IterationDropdown({}, rallyDataSource); dropdown_type='Iteration';}
+				if(radiobutton2.getChecked()){myDropdown = new rally.sdk.ui.ReleaseDropdown({}, rallyDataSource); dropdown_type='Release';}
+				first_time=false;
+				myDropdown.display(document.getElementById("dropdown_menu"), iteration_Selected);
+			}
+		
+		function onChanged(sender, eventArgs){
+			if(myDropdown){
+			myDropdown.destroy();
+			}
+			if(eventArgs.value.indexOf("Iteration") !== -1){myDropdown = new rally.sdk.ui.IterationDropdown({}, rallyDataSource); dropdown_type=eventArgs.value;}
+			if(eventArgs.value.indexOf("Release") !== -1){myDropdown = new rally.sdk.ui.ReleaseDropdown({}, rallyDataSource); dropdown_type=eventArgs.value;}			
+			myDropdown.display(document.getElementById("dropdown_menu"), iteration_Selected);
+		}
+
+		
+		function iteration_Selected() {
+			
+			var queryConfig = null;
+			if(dropdown_type.indexOf("Iteration") !== -1){
+			queryConfig = {
+			type : 'defect',
+			key : 'defects',
+			fetch: 'FormattedID,Name,Priority,State,KanbanState,Iteration,Release,DisplayName,SubmittedBy,Owner',
+			query: '(Iteration.Name = "' + encodeURIComponent(myDropdown.getSelectedName()) + '")',
+			order: 'State,Priority,KanbanState'
+				};
+			}   
+			if(dropdown_type.indexOf("Release") !== -1){
+			queryConfig = {
+			type : 'defect',
+			key : 'defects',
+			fetch: 'FormattedID,Name,Priority,State,KanbanState,Iteration,Release,DisplayName,SubmittedBy,Owner',
+			query: '(Release.Name = "' + encodeURIComponent(myDropdown.getSelectedName()) + '")',
+			order: 'State,Priority,KanbanState'
+				};
+			}
+			rallyDataSource.findAll(queryConfig, showUserdefectsTable);
+		}
+		
+		function showUserdefectsTable(results) {
+			var collectdefects=[];
+			for(var i=0; i<results.defects.length; i++){
+				var a = {
+					item: {
+						FormattedID: results.defects[i].FormattedID,
+						"_ref": results.defects[i]._ref
+					}
+				};
+				var defectsLink = new rally.sdk.ui.basic.Link(a);
+				var defectsIdent = defectsLink.renderToHtml();
+				var defectsNames=results.defects[i].Name;
+				if(results.defects[i].SubmittedBy===null && results.defects[i].Owner===null){
+					var story = [defectsIdent,
+								defectsNames,
+								results.defects[i].Priority,
+								results.defects[i].State,
+								results.defects[i].KanbanState,
+								"NULL",
+								"NULL"
+								];
+				} else if (results.defects[i].Owner===null){
+					var story = [defectsIdent,
+								defectsNames,
+								results.defects[i].Priority,
+								results.defects[i].State,
+								results.defects[i].KanbanState,
+								results.defects[i].SubmittedBy.DisplayName,
+								"NULL"
+								];
+				} else if(results.defects[i].SubmittedBy===null){
+					var story = [defectsIdent,
+								defectsNames,
+								results.defects[i].Priority,
+								results.defects[i].State,
+								results.defects[i].KanbanState,
+								"NULL",
+								results.defects[i].Owner.DisplayName
+								];
+				} else {
+					var story = [defectsIdent,
+								defectsNames,
+								results.defects[i].Priority,
+								results.defects[i].State,
+								results.defects[i].KanbanState,
+								results.defects[i].SubmittedBy.DisplayName,
+								results.defects[i].Owner.DisplayName
+								];
+				};
+				
+				collectdefects.push(story);
+			}
+
+			var data = new google.visualization.DataTable();
+			data.addColumn('string', 'ID');
+			data.addColumn('string', 'Defects');
+			data.addColumn('string', 'Priority');
+			data.addColumn('string', 'State');
+			data.addColumn('string', 'Kanban State');
+			data.addColumn('string', 'Submitted By');
+			data.addColumn('string', 'Owner');
+			data.addRows(collectdefects);
+			
+			table = new google.visualization.Table(document.getElementById('defects'));
+			
+			// Add Color format to table (pass->green, fail->red, error->orange inconclusive->blue)
+			var formatter = new google.visualization.TableColorFormat();
+			formatter.addRange('1ShowStopper', '1ShowStoppera', 'white', 'red');
+			//formatter.addRange('2MustHave', '2MustHavea', 'white', 'orange');
+			//formatter.addRange('3ShouldHave', '3ShouldHavea', 'white', 'blue');
+			//formatter.addRange('4MayHave', '4MayHavea', 'white', 'green');
+			formatter.format(data, 2);
+		
+			//Create and draw the table(google api)
+			//Sort table 'asc' according to column 
+			//data.sort([{column: 2, asc: true}]);
+			
+			table.draw(data, {allowHtml: true, showRowNumber: true});
+			
+		   
+		}
+
+		
+    }
+
+     rally.addOnLoad(my_main);
+  </script>
+
+</head>
+<body>
+	<b>Please choose:</b>
+	<br/>
+	<div id="button1"></div>
+	<div id="button2"></div>
+	<br/><br/>
+    <div id="dropdown_menu"></div>
+	<br/><br/>
+	<div id="defects"></div>
+</body>
+</html> 
