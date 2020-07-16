@@ -1,4 +1,7 @@
-# rally-reports-SDK1.x
+## Rally
+Cloud-based Agile development management platform
+
+# rally-reports from SDK 1.x
 
 These reports are to be embedded in Custom HTML frame inside Rally. Rally developer page explains more about it.
 
